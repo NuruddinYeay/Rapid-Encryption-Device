@@ -1,0 +1,84 @@
+# 1. Install the Python Serial Library
+sudo apt update && sudo apt install -y python3-serial
+
+# 2. Create the permanent project folder
+sudo mkdir -p /opt/lcd_project
+
+# 3. Create the Python Script (send_ip.py)
+sudo tee /opt/lcd_project/send_ip.py > /dev/null << 'EOF'
+import serial
+import time
+import subprocess
+
+SERIAL_PORT = '/dev/red_lcd'
+BAUD_RATE = 9600
+
+# NOTE: Change these if the exhibition server uses different port names!
+PORT1_INTERFACE = "enp1s0"   
+PORT2_INTERFACE = "enp2s0"   
+
+def get_ip(interface):
+    try:
+        cmd = f"ip -4 -o addr show {interface} 2>/dev/null | awk '{{print $4}}' | cut -d/ -f1 | head -n 1"
+        ip = subprocess.check_output(cmd, shell=True).decode('ascii').strip()
+        if ip:
+            return ip
+        else:
+            return "Disconnected"
+    except Exception:
+        return "Disconnected"
+
+def main():
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    except Exception:
+        return
+
+    while True:
+        try:
+            ip1 = get_ip(PORT1_INTERFACE)
+            ip2 = get_ip(PORT2_INTERFACE)
+            data_string = f"{ip1},{ip2},1\n"
+            ser.write(data_string.encode('ascii'))
+            time.sleep(2)
+        except Exception:
+            time.sleep(2)
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# 4. Create the Leonardo USB "Anti-Jumping" Rule
+sudo tee /etc/udev/rules.d/99-arduino.rules > /dev/null << 'EOF'
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="8036", SYMLINK+="red_lcd"
+EOF
+
+# 5. Create the Background Service
+sudo tee /etc/systemd/system/lcd_ip.service > /dev/null << 'EOF'
+[Unit]
+Description=Rapid Encryption Device LCD Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/lcd_project/send_ip.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 6. Apply and activate all rules and services
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+sudo systemctl daemon-reload
+sudo systemctl enable lcd_ip.service
+sudo systemctl start lcd_ip.service
+
+echo ""
+echo "========================================================"
+echo "✅ RAPID ENCRYPTION DEVICE DISPLAY SETUP COMPLETE!"
+echo "========================================================"
+echo "If your screen says 'Disconnected', remember to update"
+echo "your port names in /opt/lcd_project/send_ip.py!"
+echo "========================================================"
